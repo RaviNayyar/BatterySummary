@@ -62,7 +62,7 @@ class BatteryMonitor:
         
         data = [
             timestamp,
-            battery_info["percentage"],
+            f"{battery_info['percentage']}%",  # Add % symbol for display
             battery_info["status"],
             battery_info["time_remaining"]
         ] + processes
@@ -82,11 +82,18 @@ class BatteryMonitor:
                 last_line = file.readlines()[-1].strip()
                 last_data = last_line.split(',')
                 
+                # Strip % from percentages before comparing
+                current_percentage = int(current_data[1].rstrip('%'))
+                last_percentage = int(last_data[1].rstrip('%'))
+                
                 # Log if battery percentage or status changed
-                return (current_data[1] != int(last_data[1]) or 
+                return (current_percentage != last_percentage or 
                         current_data[2] != last_data[2])
         except (FileNotFoundError, IndexError):
             return True  # Log if file doesn't exist or is empty
+        except ValueError as e:
+            print(f"Error parsing battery values: {e}")
+            return True  # Log if there's any parsing error
 
     def _print_status(self, battery_info, processes):
         """Print current status to console"""
