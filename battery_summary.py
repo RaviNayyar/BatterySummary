@@ -38,25 +38,32 @@ class BatterySummary:
         }
 
         for row in data:
-            timestamp, level, status = row[0], int(row[1]), row[2]
-            processes = row[4:7] if len(row) >= 7 else []
+            try:
+                timestamp = row[0]
+                level = int(row[1].rstrip('%'))  # Strip % before converting to int
+                status = row[2]
+                processes = row[4:7] if len(row) >= 7 else []
 
-            if current_section['direction'] != status:
-                if current_section['direction'] is not None:
-                    current_section['end_time'] = timestamp
-                    current_section['end_level'] = level
-                    sections.append(current_section.copy())
+                if current_section['direction'] != status:
+                    if current_section['direction'] is not None:
+                        current_section['end_time'] = timestamp
+                        current_section['end_level'] = level
+                        sections.append(current_section.copy())
 
-                current_section = {
-                    'start_time': timestamp,
-                    'start_level': level,
-                    'direction': status,
-                    'processes': defaultdict(int)
-                }
+                    current_section = {
+                        'start_time': timestamp,
+                        'start_level': level,
+                        'direction': status,
+                        'processes': defaultdict(int)
+                    }
 
-            # Track process frequency
-            for process in processes:
-                current_section['processes'][process] += 1
+                # Track process frequency
+                for process in processes:
+                    current_section['processes'][process] += 1
+
+            except (IndexError, ValueError) as e:
+                print(f"Warning: Skipping malformed data row: {row}")
+                continue
 
         # Add final section
         if current_section['direction'] is not None:
