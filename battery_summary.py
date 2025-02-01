@@ -100,15 +100,25 @@ class BatterySummary:
     def _print_graph(self, points):
         """Print ASCII battery graph"""
         print("\nBattery Level History:")
-        print("=" * (self.max_width + 5))
+        print("-" * 50)  # Shorter separator line
 
+        # Use fewer height levels (10 instead of 25)
+        self.max_height = 10
+        self.height_scale = 100 // self.max_height
+
+        # Use lighter characters for visualization
         for height in range(self.max_height, -1, -1):
-            line = f"{height*self.height_scale:3}| "
+            if height % 2 == 0:  # Only show every other percentage label
+                line = f"{height*self.height_scale:3}% "
+            else:
+                line = "    "
+            
             for value in points:
-                line += "█" if value >= height else " "
+                # Use lighter characters: '·' for empty, '▪' for filled
+                line += "▪" if value >= height else "·"
             print(line)
 
-        print("-" * (self.max_width + 5))
+        print("-" * 50)
 
     def _print_summary(self, latest_section):
         """Print summary of latest battery section"""
@@ -119,16 +129,9 @@ class BatterySummary:
             reverse=True
         )[:3]
 
-        summary = f"""
-Latest Battery Status:
-    Direction: {latest_section['direction']}
-    Level Change: {latest_section['start_level']}% → {latest_section['end_level']}%
-    Time Period: {latest_section['start_time']} → {latest_section['end_time']}
-
-Most Active Processes:"""
-
-        for proc, count in top_processes:
-            summary += f"\n    {chr(8226)} {proc} ({count} occurrences)"
+        summary = f"""Battery Status: {latest_section['direction']} ({latest_section['start_level']}% → {latest_section['end_level']}%)
+Time: {latest_section['start_time']} → {latest_section['end_time']}
+Top Processes: {', '.join(f'{proc}({count})' for proc, count in top_processes)}"""
 
         print(summary)
 
