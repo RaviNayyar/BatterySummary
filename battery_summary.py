@@ -1,250 +1,135 @@
+#!/usr/bin/env python3
 from datetime import datetime
-import subprocess
 import csv
+from collections import defaultdict
 import sys
 
-status_file = "/home/ravi/.RaviNayyar/Programs/battery/battery_status.log"
+class BatterySummary:
+    def __init__(self, log_file="battery_status.log"):
+        self.log_file = log_file
+        self.max_width = 100
+        self.max_height = 25
+        self.height_scale = 100 // self.max_height
 
-charging_string = "Charging"
-discharging_string = "Discharging"
-
-#Graph settings
-max_height = 25
-max_width = 100
-height_reducer = int(100/max_height)
-
-def run_command(command):
-    try:
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, check=True)
-        return result.stdout.strip()
-    except subprocess.CalledProcessError as e:
-        return f"Error: {e.stderr.strip()}"
-
-
-def get_battery_delta(section):
-    delta = section['h'] - section['l']
-    if delta < 0:
-        return -1*delta
-    return delta
-
-
-def get_current_time():
-    current_time = datetime.now()
-    return current_time.strftime("%H:%M:%S")
-
-
-def get_top_processes():
-    command = "ps aux --sort=-%mem | awk 'NR>1 && $11 != \"ps\" {split($11, a, \"/\"); print a[length(a)]}' | head -n 3"
-    output = run_command(command)
-    return output.split("\n")
-    
-
-def get_battery_status():
-    battery_output = run_command('acpi -b')
-    battery_output = battery_output.split(",")
-    status = battery_output[0]
-    status = status[status.index(":")+2:].strip()
-    level = battery_output[1].strip()
-    remainder = battery_output[2].strip()
-    return [level, status, remainder]
-
-
-def write_to_file(data):
-    with open(status_file, mode='a', newline='') as file:
-        writer = csv.writer(file)
-        writer.writerow(data)
-
-# TODO: Processes cannot be what is current, it needs to be the top processes found
-def get_status():
-    status = []
-    time = get_current_time()
-    battery_status = get_battery_status()
-    process_list = get_top_processes()
-    status.append(time)
-    status = status + battery_status + process_list
-
-    print_status = '''
-    Time            {0}
-    Current Level:  {1}
-    Current Status: {2}
-    Remainder:      {3}
-
-    Top Processes
-    \t{4}
-    \t{5}
-    \t{6}
-    '''.format(time,battery_status[0], battery_status[1], battery_status[2], process_list[0], process_list[1], process_list[2])
-
-    return [status, print_status]
-
-    #write_to_file(status)
-
-
-def print_histogram(data):
-    height_denotion = '| '
-    print_point = '#'
-    empty_point = ' '*len(print_point)
-    # Print the histogram
-    for height in range(max_height, 0, -1):
-        line = height_denotion
-        for value in data:
-            if value >= height:
-                line += print_point
-            else:
-                line += empty_point
-        print(line)
-    print("-"*max_width)
-
-
-def generate_battery_graph(og):
-    def extract_data(section):
-        high = section["h"]
-        low = section["l"]
-        direction = section["d"]
-        graph_section = []
-        
-        start = low
-        end = high
-        iteration = 1
-        if direction == discharging_string:
-            iteration = 1 * -1
-            start = high 
-            end = low 
-        
-        for x in range(start, end, iteration):
-            reduced_x = int(x/height_reducer)
-            graph_section.append(reduced_x)
-
-        return graph_section
-
-    def extract_data_old(section):
-        bd = get_battery_delta(section)
-        
-        iteration = 0
-        if bd >= 70:
-            iteration = 2
-        elif bd >= 35 and bd < 70:
-            iteration = 4
-        else:
-            iteration = 6
-        
-        high = section["h"]
-        low = section["l"]
-        direction = section["d"]
-        graph_section = []
-        
-        start = low
-        end = high
-
-        if direction == discharging_string:
-            iteration = iteration * -1
-            start = high 
-            end = low 
-        
-        for x in range(start, end, iteration):
-            reduced_x = int(x/height_reducer)
-            graph_section.append(reduced_x)
-
-        return graph_section
-
-    extracted = []
-    for s in og:
-        extracted += extract_data(s)
-
-    if len(extracted) > 100:
-        extracted = extracted[len(extracted)-100:]
-
-    print_histogram(extracted)
-
-
-def organize_battery_data():
-    def set_top_processes(proc, p_ds):
-        for p in proc:
-            if p not in p_ds:
-                p_ds[p] = 1
-            else:
-                p_ds[p] += 1
-
-    def add_proccesses_to_section(current_section, process_dict):
-        sorted_processes = sorted(process_dict.items(), key=lambda x: x[1], reverse=True)
-        top_processes = [p[0] for p in sorted_processes[:3]]
+    def load_data(self):
+        """Load and parse battery log data"""
         try:
-            current_section["p1"] = top_processes[0]
-            current_section["p2"] = top_processes[1]
-            current_section["p3"] = top_processes[2]
-        except:
-            pass
+            with open(self.log_file, 'r') as file:
+                reader = csv.reader(file)
+                return list(reader)
+        except FileNotFoundError:
+            print(f"Error: Could not find log file: {self.log_file}")
+            return []
 
+    def analyze_battery_sections(self):
+        """Analyze battery data into charging/discharging sections"""
+        data = self.load_data()
+        if not data:
+            return []
 
-    organized_graph = []
-    with open(status_file, 'r') as f:
-        lines = f.readlines()
-    
-    current_section = {"h":0, "l":0, "d":"", "p1": "N/A", "p2": "N/A", "p3": "N/A"}
-    current_section_processes = {}
-    for line in lines:
-        data = line.strip().split(",")
-        level = int(data[1].strip("%"))
-        level = max(level, 1)  # Ensure level is at least 1
-        direction = data[2]
-        processes = [data[4], data[5], data[6]]
-        if current_section["d"] == "":
-            current_section["h"] = level
-            current_section["l"] = level
-            current_section["d"] = direction
+        sections = []
+        current_section = {
+            'start_time': None,
+            'end_time': None,
+            'start_level': None,
+            'end_level': None,
+            'direction': None,
+            'processes': defaultdict(int)
+        }
 
-        if direction == current_section["d"]:
-            if direction == charging_string:
-                current_section["h"] = level
-            else:
-                current_section["l"] = level
+        for row in data:
+            timestamp, level, status = row[0], int(row[1]), row[2]
+            processes = row[4:7] if len(row) >= 7 else []
 
-            set_top_processes(processes, current_section_processes)            
-        
-        else:
-            add_proccesses_to_section(current_section, current_section_processes)
-            organized_graph.append(current_section.copy())
+            if current_section['direction'] != status:
+                if current_section['direction'] is not None:
+                    current_section['end_time'] = timestamp
+                    current_section['end_level'] = level
+                    sections.append(current_section.copy())
 
-            current_section_processes = {}
-            current_section = {"h":0, "l":0, "d":"", "p1": "N/A", "p2": "N/A", "p3": "N/A"}
+                current_section = {
+                    'start_time': timestamp,
+                    'start_level': level,
+                    'direction': status,
+                    'processes': defaultdict(int)
+                }
 
-            current_section["h"] = level
-            current_section["l"] = level
-            current_section["d"] = direction
-            set_top_processes(processes, current_section_processes)
+            # Track process frequency
+            for process in processes:
+                current_section['processes'][process] += 1
 
+        # Add final section
+        if current_section['direction'] is not None:
+            current_section['end_time'] = timestamp
+            current_section['end_level'] = level
+            sections.append(current_section)
 
-    add_proccesses_to_section(current_section, current_section_processes)
-    organized_graph.append(current_section.copy())
+        return sections
 
-    # Condensing battery data
-    remaining_data_points = max_width
-    bat_data = []
+    def generate_graph(self):
+        """Generate ASCII battery graph"""
+        sections = self.analyze_battery_sections()
+        if not sections:
+            return
 
-    for s in range(len(organized_graph)-1, -1, -1):
-        bat_delta = get_battery_delta(organized_graph[s])
-        if (remaining_data_points - bat_delta) >= 0:
-            remaining_data_points -= bat_delta
-            bat_data = [organized_graph[s]] + bat_data
-        else:
-            direction = organized_graph[s]["d"]
-            if direction == discharging_string:
-                organized_graph[s]["l"] = max_width - (organized_graph[s]["h"] - remaining_data_points)
-                bat_data = [organized_graph[s]] + bat_data
-                return bat_data
+        # Generate points for graph
+        points = []
+        for section in sections:
+            start_level = section['start_level']
+            end_level = section['end_level']
+            step = 1 if start_level <= end_level else -1
+            
+            section_points = list(range(start_level, end_level + step, step))
+            points.extend([p // self.height_scale for p in section_points])
 
-    return bat_data
+        # Trim to max width if needed
+        if len(points) > self.max_width:
+            points = points[-self.max_width:]
 
+        # Print graph
+        self._print_graph(points)
+        self._print_summary(sections[-1])  # Print latest section summary
 
-def print_status():
-    status = get_status()
+    def _print_graph(self, points):
+        """Print ASCII battery graph"""
+        print("\nBattery Level History:")
+        print("=" * (self.max_width + 5))
 
+        for height in range(self.max_height, -1, -1):
+            line = f"{height*self.height_scale:3}| "
+            for value in points:
+                line += "█" if value >= height else " "
+            print(line)
 
-if __name__ == '__main__':
-    og = organize_battery_data()
-    generate_battery_graph(og)
+        print("-" * (self.max_width + 5))
 
-    printable_status = get_status()[1]
-    print(printable_status)
+    def _print_summary(self, latest_section):
+        """Print summary of latest battery section"""
+        # Get top 3 processes
+        top_processes = sorted(
+            latest_section['processes'].items(),
+            key=lambda x: x[1],
+            reverse=True
+        )[:3]
+
+        summary = f"""
+Latest Battery Status:
+    Direction: {latest_section['direction']}
+    Level Change: {latest_section['start_level']}% → {latest_section['end_level']}%
+    Time Period: {latest_section['start_time']} → {latest_section['end_time']}
+
+Most Active Processes:"""
+
+        for proc, count in top_processes:
+            summary += f"\n    {chr(8226)} {proc} ({count} occurrences)"
+
+        print(summary)
+
+def main():
+    summary = BatterySummary()
+    summary.generate_graph()
+
+if __name__ == "__main__":
+    main()
 
 
